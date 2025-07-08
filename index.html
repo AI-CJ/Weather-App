@@ -3,19 +3,17 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Elegant Desk Weather</title>
+<title>Elegant Desk Weather – deluxe</title>
 
-<!-- Free, classy typeface -->
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;500;700&display=swap" rel="stylesheet">
 
 <style>
 /* ─────────────────────────────────────────────
-   0. CSS RESET & CUSTOM PROPERTIES
+   0. RESET & CSS VARIABLES
 ───────────────────────────────────────────── */
 *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
 :root{
-  /* will be overwritten by JS */
-  --bg-start:#ffffff;
+  --bg-start:#ffffff; /* all overwritten by JS */
   --bg-end:#f8fafc;
   --text:#111827;
   --accent:#2563eb;
@@ -31,6 +29,23 @@ body{
   transition:background 1.2s,color .8s;
 }
 
+/* ✨ viewport glow ✨ */
+body::before{
+  content:'';
+  position:fixed;
+  inset:0;
+  border:6px solid var(--accent);
+  border-radius:.75rem;
+  pointer-events:none;
+  box-shadow:0 0 25px 6px var(--accent);
+  animation:pulseGlow 4s ease-in-out infinite;
+  z-index:9999;
+}
+@keyframes pulseGlow{
+  0%,100%{box-shadow:0 0 25px 6px var(--accent)}
+  50%    {box-shadow:0 0 45px 12px var(--accent)}
+}
+
 /* ─────────────────────────────────────────────
    1. LAYOUT
 ───────────────────────────────────────────── */
@@ -44,7 +59,7 @@ main{
 }
 
 .card{
-  width:min(100%,26rem);
+  width:min(100%,28rem);
   padding:2.5rem 2rem;
   display:flex;
   flex-direction:column;
@@ -61,19 +76,21 @@ h1{
   font-size:1.9rem;
   font-weight:700;
   text-align:center;
-  margin-bottom:1.25rem;
+  margin-bottom:1.2rem;
 }
 
 .info{
-  font-size:1.2rem;
-  margin-bottom:.75rem;
+  font-size:1.15rem;
+  margin-bottom:.6rem;
   text-align:center;
 }
-.info span{font-weight:500;color:var(--accent)}
+.info span{font-weight:600;color:var(--accent)}
+#extra{font-size:1rem;line-height:1.45}
 
 @media(max-width:480px){
   h1{font-size:1.55rem}
   .info{font-size:1.05rem}
+  #extra{font-size:.9rem}
 }
 </style>
 </head>
@@ -84,197 +101,206 @@ h1{
       <h1 id="location">Locating…</h1>
       <p class="info" id="time"></p>
       <p class="info" id="weather"></p>
+      <div id="extra"></div>
   </div>
 </main>
 
 <script>
-/* ╔═══════════════════════════════════════════╗
-   ║        SECTION A – CONFIGURATION          ║
-   ╚═══════════════════════════════════════════╝ */
+/* ═════════════════════════════════════════════
+   A. CONFIG
+══════════════════════════════════════════════ */
 const OPEN_WEATHER_KEY      = "116f33f6856c113117abf3231d637e7b";
-const WEATHER_REFRESH_MIN   = 10;        // call API every n minutes
-const CLOCK_TICK_MS         = 1000;      // update clock every second
+const WEATHER_REFRESH_MIN   = 10;   // fetch new data every … minutes
+const CLOCK_TICK_MS         = 1000; // UI tick
 
-/* ╔═══════════════════════════════════════════╗
-   ║        SECTION B – DOM REFERENCES         ║
-   ╚═══════════════════════════════════════════╝ */
+/* ═════════════════════════════════════════════
+   B. DOM REFS
+══════════════════════════════════════════════ */
 const els = {
   location : document.getElementById("location"),
   time     : document.getElementById("time"),
-  weather  : document.getElementById("weather")
+  weather  : document.getElementById("weather"),
+  extra    : document.getElementById("extra")
 };
 
-/* ╔═══════════════════════════════════════════╗
-   ║        SECTION C – STATE STORAGE          ║
-   ╚═══════════════════════════════════════════╝ */
+/* ═════════════════════════════════════════════
+   C. STATE
+══════════════════════════════════════════════ */
 let state = {
-  coords        : null,      // {lat,lon}
-  weather       : null,      // last weather payload
-  paletteToken  : null       // e.g. "dusk-rain" – to detect changes
+  coords        : null,
+  basic         : null,   // /weather endpoint
+  detail        : null,   // /onecall endpoint
+  paletteToken  : null
 };
 
-/* ╔═══════════════════════════════════════════╗
-   ║        SECTION D – INITIALISATION         ║
-   ╚═══════════════════════════════════════════╝ */
+/* ═════════════════════════════════════════════
+   D. INIT
+══════════════════════════════════════════════ */
 init();
 async function init(){
   try{
-      state.coords = await getCoords();
-      await updateWeather();         // initial weather fetch
-      startClockLoop();              // start 1-second UI loop
-      setInterval(updateWeather, WEATHER_REFRESH_MIN*60*1000);
+    state.coords = await getCoords();
+    await updateWeather();
+    startClockLoop();
+    setInterval(updateWeather, WEATHER_REFRESH_MIN*60*1000);
   }catch(err){
-      console.error(err);
-      els.location.textContent = "Location unavailable ❌";
-      els.time.textContent     = "";
-      els.weather.textContent  = "Allow location access and reload.";
+    console.error(err);
+    showError("Location unavailable ❌","Allow location & reload.");
   }
 }
 
-/* ╔═══════════════════════════════════════════╗
-   ║        SECTION E – CLOCK / UI LOOP        ║
-   ╚═══════════════════════════════════════════╝ */
+/* ═════════════════════════════════════════════
+   E. CLOCK RENDER
+══════════════════════════════════════════════ */
 function startClockLoop(){
-  render();                // paint immediately
+  render();
   setInterval(render, CLOCK_TICK_MS);
 }
 
 function render(){
-  if(!state.weather) return;
+  if(!state.basic || !state.detail) return;
 
-  /* 1. CLOCK TEXT (local) */
-  const locDate  = new Date();
-  els.time.innerHTML = `<span>Time:</span> ${locDate.toLocaleString([],{
-    hour:'numeric',minute:'2-digit',second:'2-digit',
-    weekday:'long',month:'long',day:'numeric'
-  })}`;
+  /* 1. TIME */
+  const now = new Date();
+  els.time.innerHTML =
+    `<span>Time:</span> ${now.toLocaleString([],{
+       hour:'numeric',minute:'2-digit',second:'2-digit',
+       weekday:'long',month:'long',day:'numeric'
+     })}`;
 
-  /* 2. WEATHER TEXT (static until next API hit) */
-  const w = state.weather;
-  const desc  = w.weather[0].main;
-  const tempC = Math.round(w.main.temp);
-  els.location.textContent = w.name;
-  els.weather.innerHTML    = `<span>Weather:</span> ${desc}, ${tempC}°C`;
+  /* 2. MAIN WEATHER LINE */
+  const d = state.basic;
+  const desc = d.weather[0].main;
+  const temp = Math.round(d.main.temp);
+  els.location.textContent = d.name;
+  els.weather.innerHTML    = `<span>Weather:</span> ${desc}, ${temp}°C`;
 
-  /* 3. THEME TOKEN – depends on time & weather */
-  const token = buildPaletteToken(locDate.getTime()/1000, w); // pass unix seconds
-  if(token !== state.paletteToken){
-      state.paletteToken = token;
-      applyPalette(PALETTES[token] || PALETTES["day-clear"]);
+  /* 3. EXTRA DETAILS */
+  const c = state.detail.current;
+  els.extra.innerHTML = `
+    Feels like <strong>${Math.round(c.feels_like)}°C</strong> •
+    Humidity <strong>${c.humidity}%</strong> •
+    Wind <strong>${Math.round(c.wind_speed*3.6)} km/h</strong> •
+    UV <strong>${c.uvi}</strong> •
+    Pressure <strong>${c.pressure} hPa</strong><br>
+    Visibility <strong>${Math.round(c.visibility/1000)} km</strong> •
+    Sunrise <strong>${formatUnix(c.sunrise)}</strong> •
+    Sunset <strong>${formatUnix(c.sunset)}</strong>
+  `;
+
+  /* 4. PALETTE */
+  const token = buildPaletteToken(now.getTime()/1000,d);
+  if(token!==state.paletteToken){
+    state.paletteToken = token;
+    applyPalette(PALETTES[token] || PALETTES["day-clear"]);
   }
 }
 
-/* ╔═══════════════════════════════════════════╗
-   ║        SECTION F – DATA FETCHING          ║
-   ╚═══════════════════════════════════════════╝ */
+/* ═════════════════════════════════════════════
+   F. FETCH
+══════════════════════════════════════════════ */
 function getCoords(){
   return new Promise((res,rej)=>{
     if(!navigator.geolocation) return rej(new Error("Geolocation unsupported"));
     navigator.geolocation.getCurrentPosition(
-      pos=>res({lat:pos.coords.latitude,lon:pos.coords.longitude}),
-      rej,
-      {enableHighAccuracy:true,timeout:10000}
+      p=>res({lat:p.coords.latitude,lon:p.coords.longitude}),
+      rej,{enableHighAccuracy:true,timeout:10000}
     );
   });
 }
 
 async function updateWeather(){
   const {lat,lon} = state.coords;
-  const url = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&units=metric&appid=${OPEN_WEATHER_KEY}`;
-  const r   = await fetch(url);
-  if(!r.ok) throw new Error("Weather API error");
-  state.weather = await r.json();
+  const urlBasic   = `https://api.openweathermap.org/data/2.5/weather?lat=${lat}&lon=${lon}&units=metric&appid=${OPEN_WEATHER_KEY}`;
+  const urlDetail  = `https://api.openweathermap.org/data/2.5/onecall?lat=${lat}&lon=${lon}&units=metric&exclude=minutely,hourly,daily,alerts&appid=${OPEN_WEATHER_KEY}`;
+
+  const [basic,detail] = await Promise.all([fetch(urlBasic),fetch(urlDetail)]);
+  if(!basic.ok || !detail.ok) throw new Error("Weather API error");
+  state.basic  = await basic.json();
+  state.detail = await detail.json();
 }
 
-/* ╔═══════════════════════════════════════════╗
-   ║        SECTION G – THEME ENGINE           ║
-   ╚═══════════════════════════════════════════╝ */
-function normalise(desc){
-  const d = desc.toLowerCase();
-  if(d.includes("thunder")) return "thunder";
-  if(/rain|drizzle/.test(d))return "rain";
-  if(/snow/.test(d))        return "snow";
-  if(/cloud/.test(d))       return "clouds";
-  if(/mist|haze|fog|smoke|ash|dust|sand/.test(d)) return "fog";
-  if(/tornado|squall/.test(d)) return "wind";
-  return "clear";
+/* ═════════════════════════════════════════════
+   G. UTILS – THEME
+══════════════════════════════════════════════ */
+function normalise(s){
+  s=s.toLowerCase();
+  if(s.includes("thunder"))return"thunder";
+  if(/rain|drizzle/.test(s))return"rain";
+  if(/snow/.test(s))return"snow";
+  if(/cloud/.test(s))return"clouds";
+  if(/mist|haze|fog|smoke|ash|dust|sand/.test(s))return"fog";
+  if(/tornado|squall/.test(s))return"wind";
+  return"clear";
 }
-
-function timePeriod(now,sunrise,sunset){
-  const ONE_HR = 3600;
-  if(now < sunrise-ONE_HR) return "night";
-  if(now < sunrise+ONE_HR) return "dawn";
-  if(now < sunset-ONE_HR)  return "day";
-  if(now < sunset+ONE_HR)  return "dusk";
-  return "night";
+function timePart(now,sunrise,sunset){
+  const H=3600;
+  if(now<sunrise-H)           return"night";
+  if(now<sunrise+H)           return"dawn";
+  if(now<sunset-H)            return"day";
+  if(now<sunset+H)            return"dusk";
+  return"night";
 }
-
-function buildPaletteToken(nowUnix,weather){
-  const group   = normalise(weather.weather[0].main);
-  const period  = timePeriod(nowUnix, weather.sys.sunrise, weather.sys.sunset);
-  return `${period}-${group}`;
+function buildPaletteToken(now,base){
+  return `${timePart(now,base.sys.sunrise,base.sys.sunset)}-${normalise(base.weather[0].main)}`;
 }
-
 function applyPalette(p){
-  document.documentElement.style.setProperty("--bg-start",p.bgStart);
-  document.documentElement.style.setProperty("--bg-end",p.bgEnd);
-  document.documentElement.style.setProperty("--text",p.text);
-  document.documentElement.style.setProperty("--accent",p.accent);
-  document.documentElement.style.setProperty("--border",p.border || p.accent);
-  document.documentElement.style.setProperty("--glass-rgba",hexToGlass(p.bgEnd,0.3));
+  const doc=document.documentElement;
+  doc.style.setProperty("--bg-start",p.bgStart);
+  doc.style.setProperty("--bg-end",p.bgEnd);
+  doc.style.setProperty("--text",p.text);
+  doc.style.setProperty("--accent",p.accent);
+  doc.style.setProperty("--border",p.border||p.accent);
+  doc.style.setProperty("--glass-rgba",hexToGlass(p.bgEnd,.35));
 }
-
-function hexToGlass(hex,alpha){
+function hexToGlass(hex,a){
   const n=parseInt(hex.slice(1),16);
-  const r=(n>>16)&255,g=(n>>8)&255,b=n&255;
-  return `rgba(${r},${g},${b},${alpha})`;
+  return`rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`;
+}
+function formatUnix(u){
+  return new Date(u*1000).toLocaleTimeString([],{
+    hour:'2-digit',minute:'2-digit'
+  });
+}
+function showError(title,msg){
+  els.location.textContent=title;
+  els.time.textContent="";
+  els.weather.textContent=msg;
+  els.extra.textContent="";
 }
 
-/* ╔═══════════════════════════════════════════╗
-   ║        SECTION H – COLOUR PALETTES        ║
-   ╚═══════════════════════════════════════════╝ */
-const PALETTES = {
- /* CLEAR SKY */
- "dawn-clear":   {bgStart:"#ffedd5",bgEnd:"#ffe4b5",text:"#4b371c",accent:"#f59e0b"},
- "day-clear":    {bgStart:"#cfe9ff",bgEnd:"#9cd6ff",text:"#083344",accent:"#0ea5e9"},
- "dusk-clear":   {bgStart:"#fde2d4",bgEnd:"#fab797",text:"#3c1a02",accent:"#f97316"},
- "night-clear":  {bgStart:"#031634",bgEnd:"#0b2946",text:"#dbeafe",accent:"#fef08a"},
-
- /* CLOUDS */
- "dawn-clouds":  {bgStart:"#e2e8f0",bgEnd:"#cfd8e3",text:"#374151",accent:"#94a3b8"},
- "day-clouds":   {bgStart:"#d9e2ec",bgEnd:"#bcccdc",text:"#334155",accent:"#64748b"},
- "dusk-clouds":  {bgStart:"#dcd7d1",bgEnd:"#bcb4af",text:"#3f3f46",accent:"#8e8d8a"},
- "night-clouds": {bgStart:"#2b303b",bgEnd:"#3f4753",text:"#d1d5db",accent:"#9ca3af"},
-
- /* RAIN */
- "dawn-rain":    {bgStart:"#cfd8dc",bgEnd:"#90a4ae",text:"#1e293b",accent:"#0284c7"},
- "day-rain":     {bgStart:"#a5b4fc",bgEnd:"#60a5fa",text:"#0c1f4a",accent:"#2563eb"},
- "dusk-rain":    {bgStart:"#7895b2",bgEnd:"#536d8d",text:"#f1f5f9",accent:"#1e40af"},
- "night-rain":   {bgStart:"#1e293b",bgEnd:"#334155",text:"#dbeafe",accent:"#3b82f6"},
-
- /* THUNDER */
- "dawn-thunder": {bgStart:"#e8e7e5",bgEnd:"#d2d1cf",text:"#3f3f46",accent:"#facc15"},
- "day-thunder":  {bgStart:"#b1b1b1",bgEnd:"#8d8d8d",text:"#111827",accent:"#fcd34d"},
- "dusk-thunder": {bgStart:"#5f5b66",bgEnd:"#3f3a43",text:"#f3f4f6",accent:"#fde047"},
+/* ═════════════════════════════════════════════
+   H. COLOUR PALETTES  (unchanged)
+══════════════════════════════════════════════ */
+const PALETTES={ /* –– same table you already had –– */
+ "dawn-clear":{bgStart:"#ffedd5",bgEnd:"#ffe4b5",text:"#4b371c",accent:"#f59e0b"},
+ "day-clear":{bgStart:"#cfe9ff",bgEnd:"#9cd6ff",text:"#083344",accent:"#0ea5e9"},
+ "dusk-clear":{bgStart:"#fde2d4",bgEnd:"#fab797",text:"#3c1a02",accent:"#f97316"},
+ "night-clear":{bgStart:"#031634",bgEnd:"#0b2946",text:"#dbeafe",accent:"#fef08a"},
+ "dawn-clouds":{bgStart:"#e2e8f0",bgEnd:"#cfd8e3",text:"#374151",accent:"#94a3b8"},
+ "day-clouds":{bgStart:"#d9e2ec",bgEnd:"#bcccdc",text:"#334155",accent:"#64748b"},
+ "dusk-clouds":{bgStart:"#dcd7d1",bgEnd:"#bcb4af",text:"#3f3f46",accent:"#8e8d8a"},
+ "night-clouds":{bgStart:"#2b303b",bgEnd:"#3f4753",text:"#d1d5db",accent:"#9ca3af"},
+ "dawn-rain":{bgStart:"#cfd8dc",bgEnd:"#90a4ae",text:"#1e293b",accent:"#0284c7"},
+ "day-rain":{bgStart:"#a5b4fc",bgEnd:"#60a5fa",text:"#0c1f4a",accent:"#2563eb"},
+ "dusk-rain":{bgStart:"#7895b2",bgEnd:"#536d8d",text:"#f1f5f9",accent:"#1e40af"},
+ "night-rain":{bgStart:"#1e293b",bgEnd:"#334155",text:"#dbeafe",accent:"#3b82f6"},
+ "dawn-thunder":{bgStart:"#e8e7e5",bgEnd:"#d2d1cf",text:"#3f3f46",accent:"#facc15"},
+ "day-thunder":{bgStart:"#b1b1b1",bgEnd:"#8d8d8d",text:"#111827",accent:"#fcd34d"},
+ "dusk-thunder":{bgStart:"#5f5b66",bgEnd:"#3f3a43",text:"#f3f4f6",accent:"#fde047"},
  "night-thunder":{bgStart:"#21232c",bgEnd:"#393d4d",text:"#f9fafb",accent:"#facc15"},
-
- /* SNOW */
- "dawn-snow":    {bgStart:"#f0f9ff",bgEnd:"#dbeafe",text:"#145374",accent:"#0ea5e9"},
- "day-snow":     {bgStart:"#e0f2fe",bgEnd:"#bae6fd",text:"#0c4a6e",accent:"#0284c7"},
- "dusk-snow":    {bgStart:"#cbd5e1",bgEnd:"#94a3b8",text:"#1e293b",accent:"#0ea5e9"},
- "night-snow":   {bgStart:"#0b3d91",bgEnd:"#164eb5",text:"#cfe0f3",accent:"#6ba8e5"},
-
- /* FOG */
- "dawn-fog":     {bgStart:"#e2e8f0",bgEnd:"#e8e9eb",text:"#374151",accent:"#a1a1aa"},
- "day-fog":      {bgStart:"#d1d5db",bgEnd:"#a1a1aa",text:"#1f2937",accent:"#6b7280"},
- "dusk-fog":     {bgStart:"#a1a1aa",bgEnd:"#71717a",text:"#f1f5f9",accent:"#d4d4d8"},
- "night-fog":    {bgStart:"#484d54",bgEnd:"#30363d",text:"#d1d5db",accent:"#a1a1aa"},
-
- /* WIND / TORNADO */
- "dawn-wind":    {bgStart:"#fce7f3",bgEnd:"#fbcfe8",text:"#831843",accent:"#db2777"},
- "day-wind":     {bgStart:"#fda4af",bgEnd:"#fb7185",text:"#7f1d1d",accent:"#be123c"},
- "dusk-wind":    {bgStart:"#f472b6",bgEnd:"#ec4899",text:"#ffffff",accent:"#db2777"},
- "night-wind":   {bgStart:"#9d174d",bgEnd:"#831843",text:"#fce7f3",accent:"#f9a8d4"}
+ "dawn-snow":{bgStart:"#f0f9ff",bgEnd:"#dbeafe",text:"#145374",accent:"#0ea5e9"},
+ "day-snow":{bgStart:"#e0f2fe",bgEnd:"#bae6fd",text:"#0c4a6e",accent:"#0284c7"},
+ "dusk-snow":{bgStart:"#cbd5e1",bgEnd:"#94a3b8",text:"#1e293b",accent:"#0ea5e9"},
+ "night-snow":{bgStart:"#0b3d91",bgEnd:"#164eb5",text:"#cfe0f3",accent:"#6ba8e5"},
+ "dawn-fog":{bgStart:"#e2e8f0",bgEnd:"#e8e9eb",text:"#374151",accent:"#a1a1aa"},
+ "day-fog":{bgStart:"#d1d5db",bgEnd:"#a1a1aa",text:"#1f2937",accent:"#6b7280"},
+ "dusk-fog":{bgStart:"#a1a1aa",bgEnd:"#71717a",text:"#f1f5f9",accent:"#d4d4d8"},
+ "night-fog":{bgStart:"#484d54",bgEnd:"#30363d",text:"#d1d5db",accent:"#a1a1aa"},
+ "dawn-wind":{bgStart:"#fce7f3",bgEnd:"#fbcfe8",text:"#831843",accent:"#db2777"},
+ "day-wind":{bgStart:"#fda4af",bgEnd:"#fb7185",text:"#7f1d1d",accent:"#be123c"},
+ "dusk-wind":{bgStart:"#f472b6",bgEnd:"#ec4899",text:"#ffffff",accent:"#db2777"},
+ "night-wind":{bgStart:"#9d174d",bgEnd:"#831843",text:"#fce7f3",accent:"#f9a8d4"}
 };
 </script>
 </body>
